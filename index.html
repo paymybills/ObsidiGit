@@ -330,6 +330,8 @@
             btnIcon.classList.add('hidden');
 
             try {
+                // Call Serverless Function
+                const response = await fetch(`/api/analyze?url=${encodeURIComponent(url)}`);
                 if (!response.ok) {
                     let errorMessage = 'Analysis failed';
                     const contentType = response.headers.get("content-type");
