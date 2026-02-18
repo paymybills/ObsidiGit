@@ -8,21 +8,33 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
-# Import Dulwich
-from dulwich import porcelain
-from dulwich.repo import Repo
-from dulwich.diff import tree_changes
-from dulwich.objects import Tree
+# Import Dulwich safely
+try:
+    from dulwich import porcelain
+    from dulwich.repo import Repo
+    from dulwich.diff import tree_changes
+    from dulwich.objects import Tree
+    DULWICH_AVAILABLE = True
+    DULWICH_ERROR = None
+except ImportError as e:
+    DULWICH_AVAILABLE = False
+    DULWICH_ERROR = str(e)
 
 def get_commits(repo_path):
     """
     Retrieves commit history using Dulwich.
     """
+    if not DULWICH_AVAILABLE: return []
+    
     repo = Repo(repo_path)
     commits = []
     
     # Get walker (iterates from most recent backwards)
-    walker = repo.get_walker()
+    try:
+        walker = repo.get_walker()
+    except Exception as e:
+        print(f"Walker error: {e}")
+        return []
     
     # Convert to list and reverse to get chronological order (oldest first)
     all_commits = list(walker)
@@ -46,7 +58,7 @@ def get_commits(repo_path):
         
         for change in changes:
             # We want the filename. 
-            # change.new is None for deletions, change.old is None for creations
+            # change.new is None for deletions, change.old is None for creations.
             # If both exist (modify), we use new path.
             fpath = None
             if change.new.path:
@@ -62,15 +74,25 @@ def get_commits(repo_path):
                     files.append(str(fpath))
 
         # Parse author (Format: b"Name <email>")
-        author = commit.author.decode('utf-8', errors='replace')
+        try:
+            author = commit.author.decode('utf-8', errors='replace')
+        except:
+            author = str(commit.author)
+            
         if '<' in author:
             author = author.split('<')[0].strip()
+
+        # Parse subject
+        try:
+            subject = commit.message.decode('utf-8', errors='replace').split('\n')[0]
+        except:
+            subject = "No Subject"
 
         commits.append({
             "hash": commit.id.decode('utf-8'),
             "timestamp": commit.commit_time,
             "author": author,
-            "subject": commit.message.decode('utf-8', errors='replace').split('\n')[0],
+            "subject": subject,
             "files": files
         })
             
@@ -143,27 +165,6 @@ def generate_json(file_metadata, couplings):
     """
     Generates the final JSON structure.
     """
-    nodes = list(file_metadata.values())
-    links = []
-    
-    # Store index map
-    keys = list(file_metadata.keys())
-    key_to_id = {k: i for i, k in enumerate(keys)}
-    
-    # Reform nodes list with explicit IDs if needed, or just array matches
-    # Front-end expects d3-force structure usually.
-    # In my previous implementation I returned raw lists, let's verify format.
-    # Previous implementation:
-    """
-    nodes.append({
-        "id": f,
-        "group": get_file_type(f),
-        "size": meta["size"],
-        "owner": meta["owner"],
-        "createdAt": meta["createdAt"]
-    })
-    """
-    
     formatted_nodes = []
     for f, meta in file_metadata.items():
         formatted_nodes.append({
@@ -174,6 +175,7 @@ def generate_json(file_metadata, couplings):
             "createdAt": meta["createdAt"]
         })
 
+    links = []
     for pair, weight in couplings.items():
         source, target = pair
         if source in file_metadata and target in file_metadata:
@@ -200,13 +202,24 @@ class handler(BaseHTTPRequestHandler):
             repo_url = params.get('url', [None])[0]
 
             if not repo_url:
-                self.send_response(400)
+                # Health Check / Debug Info
+                status = 200
+                data = {"status": "ok", "dulwich_installed": DULWICH_AVAILABLE}
+                if not DULWICH_AVAILABLE:
+                    data["error"] = DULWICH_ERROR
+                
+                self.send_response(status)
                 self.send_header('Content-type', 'application/json')
                 self.end_headers()
-                self.wfile.write(json.dumps({"error": "Missing 'url' parameter"}).encode('utf-8'))
+                self.wfile.write(json.dumps(data).encode('utf-8'))
                 return
 
-            # Note: We no longer check for 'git' binary since we usage Dulwich.
+            if not DULWICH_AVAILABLE:
+                self.send_response(500)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": f"Dulwich (git) library missing: {DULWICH_ERROR}. Check server logs."}).encode('utf-8'))
+                return
 
             temp_dir = None
             try:
@@ -214,7 +227,8 @@ class handler(BaseHTTPRequestHandler):
                 
                 # Clone using Dulwich
                 # supports https://...
-                print(f"Cloning {repo_url}...")
+                # Note: Dulwich clone is strictly Git protocol or HTTPS
+                # print(f"Cloning {repo_url}...")
                 porcelain.clone(repo_url, temp_dir)
                 
                 commits = get_commits(temp_dir)
