@@ -2,14 +2,15 @@ import subprocess
 import json
 import os
 import sys
+import argparse
+import tempfile
+import shutil
 from collections import defaultdict, Counter
 from datetime import datetime
 
-def run_git_log():
+def run_git_log(repo_path):
     """
-    Executes git log to retrieve commit history.
-    Format: Hash|Timestamp|Author|Subject
-    Followed by list of modified files.
+    Executes git log to retrieve commit history in the specified repo path.
     """
     cmd = [
         "git",
@@ -17,18 +18,37 @@ def run_git_log():
         "--reverse",
         "--pretty=format:%H|%at|%aN|%s",
         "--name-only",
-        "--no-merges" # Optional: skip merges to focus on actual code changes
+        "--no-merges"
     ]
     
     try:
         # Run git command
-        result = subprocess.run(cmd, cwd=os.getcwd(), capture_output=True, text=True, encoding='utf-8', errors='replace')
+        result = subprocess.run(cmd, cwd=repo_path, capture_output=True, text=True, encoding='utf-8', errors='replace')
         if result.returncode != 0:
             print(f"Error executing git log: {result.stderr}")
             sys.exit(1)
         return result.stdout
     except Exception as e:
         print(f"Failed to run git log: {e}")
+        sys.exit(1)
+
+def clone_repo(url, temp_dir):
+    """
+    Clones the repo metadata only (partial clone) to temp_dir.
+    """
+    print(f"Cloning {url} (metadata only)...")
+    cmd = [
+        "git",
+        "clone",
+        "--filter=blob:none", # Don't download file contents
+        "--no-checkout",      # Don't check out files to disk
+        url,
+        temp_dir
+    ]
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to clone repo: {e}")
         sys.exit(1)
 
 def parse_log(log_output):
@@ -74,8 +94,6 @@ def analyze_history(commits):
     file_metadata = {} # path -> {createdAt, size(churn), owner}
     couplings = Counter() # (fileA, fileB) -> count
     
-    # Track file lifecycle to handle deletions/renames if needed (simplified for now)
-    
     for commit in commits:
         files = commit["files"]
         timestamp = commit["timestamp"]
@@ -97,7 +115,6 @@ def analyze_history(commits):
                 }
             else:
                 file_metadata[f]["size"] += 1
-                # Update owner? maybe keep original creator or last modifier
         
         # Coupling
         if len(files) > 1:
@@ -127,7 +144,10 @@ def get_file_type(filepath):
         '.h': 'HEADER',
         '.java': 'JAVA',
         '.go': 'GO',
-        '.rs': 'RUST'
+        '.rs': 'RUST',
+        '.ts': 'TS',
+        '.jsx': 'REACT',
+        '.tsx': 'REACT'
     }
     return mapping.get(ext, 'OTHER')
 
@@ -140,13 +160,8 @@ def generate_json(file_metadata, couplings):
     
     for pair, weight in couplings.items():
         source, target = pair
-        # Ensure both files still exist in metadata (though they should)
         if source in file_metadata and target in file_metadata:
-            # Use max timestamp of the two files creation as approx link time, 
-            # or could track first coupling time. 
-            # For simplicity, using max of createdAt to ensure link doesn't appear before nodes.
             link_time = max(file_metadata[source]["createdAt"], file_metadata[target]["createdAt"])
-            
             links.append({
                 "source": source,
                 "target": target,
@@ -160,25 +175,50 @@ def generate_json(file_metadata, couplings):
     }
 
 def main():
-    print("Fetching git history...")
-    log_output = run_git_log()
+    parser = argparse.ArgumentParser(description="Visualize Git Evolution")
+    parser.add_argument("repo_url", nargs="?", help="Optional URL of a remote git repository to analyze")
+    args = parser.parse_args()
+
+    repo_path = os.getcwd()
+    temp_dir = None
+
+    if args.repo_url:
+        temp_dir = tempfile.mkdtemp()
+        clone_repo(args.repo_url, temp_dir)
+        repo_path = temp_dir
     
-    print(f"Parsing {len(log_output.splitlines())} lines of log...")
-    commits = parse_log(log_output)
-    print(f"Found {len(commits)} commits.")
-    
-    print("Analyzing evolution...")
-    file_metadata, couplings = analyze_history(commits)
-    print(f"Tracked {len(file_metadata)} files and {len(couplings)} coupled pairs.")
-    
-    print("Generating JSON...")
-    data = generate_json(file_metadata, couplings)
-    
-    output_file = "evolution.json"
-    with open(output_file, "w") as f:
-        json.dump(data, f, indent=2)
+    try:
+        print(f"Fetching git history from {repo_path}...")
+        log_output = run_git_log(repo_path)
         
-    print(f"Done! Saved to {output_file}")
+        print(f"Parsing {len(log_output.splitlines())} lines of log...")
+        commits = parse_log(log_output)
+        print(f"Found {len(commits)} commits.")
+        
+        print("Analyzing evolution...")
+        file_metadata, couplings = analyze_history(commits)
+        print(f"Tracked {len(file_metadata)} files and {len(couplings)} coupled pairs.")
+        
+        print("Generating JSON...")
+        data = generate_json(file_metadata, couplings)
+        
+        output_file = "evolution.json"
+        with open(output_file, "w") as f:
+            json.dump(data, f, indent=2)
+            
+        print(f"Done! Saved to {output_file}")
+        
+    finally:
+        if temp_dir:
+            print("Cleaning up temporary directory...")
+            # simplified cleanup
+            def on_rm_error(func, path, exc_info):
+                os.chmod(path, 0o777)
+                try:
+                    func(path)
+                except Exception:
+                    pass
+            shutil.rmtree(temp_dir, onerror=on_rm_error)
 
 if __name__ == "__main__":
     main()

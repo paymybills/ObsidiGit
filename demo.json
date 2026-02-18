@@ -1,0 +1,28 @@
+{
+  "nodes": [
+    {
+      "id": "git_evolution.py",
+      "label": "git_evolution.py",
+      "type": "PYTHON",
+      "size": 1,
+      "createdAt": 1771388749,
+      "owner": "paymybills"
+    },
+    {
+      "id": "index.html",
+      "label": "index.html",
+      "type": "HTML",
+      "size": 1,
+      "createdAt": 1771388749,
+      "owner": "paymybills"
+    }
+  ],
+  "links": [
+    {
+      "source": "git_evolution.py",
+      "target": "index.html",
+      "weight": 1,
+      "createdAt": 1771388749
+    }
+  ]
+}
