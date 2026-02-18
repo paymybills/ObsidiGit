@@ -7,6 +7,8 @@ import tempfile
 import shutil
 from collections import defaultdict, Counter
 from datetime import datetime
+from http.server import BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
 
 def run_git_log(repo_path):
     """
@@ -174,51 +176,63 @@ def generate_json(file_metadata, couplings):
         "links": links
     }
 
-def main():
-    parser = argparse.ArgumentParser(description="Visualize Git Evolution")
-    parser.add_argument("repo_url", nargs="?", help="Optional URL of a remote git repository to analyze")
-    args = parser.parse_args()
-
-    repo_path = os.getcwd()
-    temp_dir = None
-
-    if args.repo_url:
-        temp_dir = tempfile.mkdtemp()
-        clone_repo(args.repo_url, temp_dir)
-        repo_path = temp_dir
-    
-    try:
-        print(f"Fetching git history from {repo_path}...")
-        log_output = run_git_log(repo_path)
-        
-        print(f"Parsing {len(log_output.splitlines())} lines of log...")
-        commits = parse_log(log_output)
-        print(f"Found {len(commits)} commits.")
-        
-        print("Analyzing evolution...")
-        file_metadata, couplings = analyze_history(commits)
-        print(f"Tracked {len(file_metadata)} files and {len(couplings)} coupled pairs.")
-        
-        print("Generating JSON...")
-        data = generate_json(file_metadata, couplings)
-        
-        output_file = "evolution.json"
-        with open(output_file, "w") as f:
-            json.dump(data, f, indent=2)
+class handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        try:
+            # CORS Headers
+            try:
+                self.send_response(200)
+            except: pass
             
-        print(f"Done! Saved to {output_file}")
-        
-    finally:
-        if temp_dir:
-            print("Cleaning up temporary directory...")
-            # simplified cleanup
-            def on_rm_error(func, path, exc_info):
-                os.chmod(path, 0o777)
-                try:
-                    func(path)
-                except Exception:
-                    pass
-            shutil.rmtree(temp_dir, onerror=on_rm_error)
+            parsed = urlparse(self.path)
+            params = parse_qs(parsed.query)
+            repo_url = params.get('url', [None])[0]
+
+            if not repo_url:
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "Missing 'url' parameter"}).encode('utf-8'))
+                return
+
+            # Check for git
+            if shutil.which("git") is None:
+               self.send_header('Content-type', 'application/json')
+               self.end_headers()
+               self.wfile.write(json.dumps({"error": "Git not installed on server environment"}).encode('utf-8'))
+               return
+
+            temp_dir = None
+            try:
+                temp_dir = tempfile.mkdtemp()
+                clone_repo(repo_url, temp_dir)
+                log_output = run_git_log(temp_dir)
+                commits = parse_log(log_output)
+                file_metadata, couplings = analyze_history(commits)
+                data = generate_json(file_metadata, couplings)
+
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(data).encode('utf-8'))
+
+            except Exception as e:
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": f"Analysis failed: {str(e)}"}).encode('utf-8'))
+            
+            finally:
+                if temp_dir and os.path.exists(temp_dir):
+                    def on_rm_error(func, path, exc_info):
+                        try:
+                            os.chmod(path, 0o777)
+                            func(path)
+                        except: pass
+                    shutil.rmtree(temp_dir, onerror=on_rm_error)
+        except Exception as outer_e:
+            try:
+                 self.send_header('Content-type', 'application/json')
+                 self.end_headers()
+                 self.wfile.write(json.dumps({"error": f"Server error: {str(outer_e)}"}).encode('utf-8'))
+            except: pass
 
 if __name__ == "__main__":
     main()
