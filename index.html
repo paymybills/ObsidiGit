@@ -333,8 +333,14 @@
                 // Call Serverless Function
                 const response = await fetch(`/api/analyze?url=${encodeURIComponent(url)}`);
                 if (!response.ok) {
-                    const err = await response.json();
-                    throw new Error(err.error || 'Analysis failed');
+                    const contentType = response.headers.get("content-type");
+                    if (contentType && contentType.indexOf("application/json") !== -1) {
+                        const errData = await response.json();
+                        if (errData.error) {
+                            throw new Error(errData.error);
+                        }
+                    }
+                    throw new Error('Analysis failed');
                 }
                 const data = await response.json();
 

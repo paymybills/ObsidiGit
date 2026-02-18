@@ -179,16 +179,12 @@ def generate_json(file_metadata, couplings):
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
-            # CORS Headers
-            try:
-                self.send_response(200)
-            except: pass
-            
             parsed = urlparse(self.path)
             params = parse_qs(parsed.query)
             repo_url = params.get('url', [None])[0]
 
             if not repo_url:
+                self.send_response(400)
                 self.send_header('Content-type', 'application/json')
                 self.end_headers()
                 self.wfile.write(json.dumps({"error": "Missing 'url' parameter"}).encode('utf-8'))
@@ -196,6 +192,7 @@ class handler(BaseHTTPRequestHandler):
 
             # Check for git
             if shutil.which("git") is None:
+               self.send_response(500)
                self.send_header('Content-type', 'application/json')
                self.end_headers()
                self.wfile.write(json.dumps({"error": "Git not installed on server environment"}).encode('utf-8'))
@@ -210,11 +207,15 @@ class handler(BaseHTTPRequestHandler):
                 file_metadata, couplings = analyze_history(commits)
                 data = generate_json(file_metadata, couplings)
 
+                self.send_response(200)
                 self.send_header('Content-type', 'application/json')
                 self.end_headers()
                 self.wfile.write(json.dumps(data).encode('utf-8'))
 
             except Exception as e:
+                try:
+                    self.send_response(500)
+                except: pass
                 self.send_header('Content-type', 'application/json')
                 self.end_headers()
                 self.wfile.write(json.dumps({"error": f"Analysis failed: {str(e)}"}).encode('utf-8'))
@@ -229,6 +230,7 @@ class handler(BaseHTTPRequestHandler):
                     shutil.rmtree(temp_dir, onerror=on_rm_error)
         except Exception as outer_e:
             try:
+                 self.send_response(500)
                  self.send_header('Content-type', 'application/json')
                  self.end_headers()
                  self.wfile.write(json.dumps({"error": f"Server error: {str(outer_e)}"}).encode('utf-8'))
