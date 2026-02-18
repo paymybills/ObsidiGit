@@ -130,13 +130,20 @@
         <!-- Stats -->
         <div class="p-4 grid grid-cols-2 gap-px bg-[#1a1a1a] border-b border-[#1a1a1a]">
             <div class="bg-black p-3 text-center">
-                <div class="text-[9px] text-[#666] uppercase tracking-wider mb-1">Modules</div>
+                <div class="text-[9px] text-[#666] uppercase tracking-wider mb-1">Items</div>
                 <div id="stat-nodes" class="text-sm font-bold text-white">0</div>
             </div>
             <div class="bg-black p-3 text-center">
                 <div class="text-[9px] text-[#666] uppercase tracking-wider mb-1">Couplings</div>
                 <div id="stat-links" class="text-sm font-bold text-white">0</div>
             </div>
+        </div>
+
+        <!-- Breadcrumbs (In Sidebar for cleanliness) -->
+        <div id="breadcrumbs"
+            class="px-4 py-3 border-b border-[#1a1a1a] flex flex-wrap gap-1 items-center bg-[#080808] min-h-[40px]">
+            <!-- Injected by JS -->
+            <span class="text-[10px] text-[#444] font-mono">ROOT</span>
         </div>
 
         <!-- Search -->
@@ -310,11 +317,55 @@
             selectedNode: null,
             blastMode: false,
             simNodes: [], // Physics entities
-            simLinks: []
+            simLinks: [],
+            currentUrl: null,
+            currentPath: [] // Breadcrumb path parts
         };
 
+        // --- BREADCRUMBS ---
+        function updateBreadcrumbs() {
+            const container = document.getElementById('breadcrumbs');
+            container.innerHTML = '';
+
+            // Root Item
+            const root = document.createElement('span');
+            root.className = `text-[10px] font-mono cursor-pointer hover:text-white transition-colors ${state.currentPath.length === 0 ? 'text-white font-bold' : 'text-[#666]'}`;
+            root.textContent = 'ROOT';
+            root.onclick = () => navigateToPath(-1);
+            container.appendChild(root);
+
+            state.currentPath.forEach((part, index) => {
+                // Separator
+                const sep = document.createElement('span');
+                sep.className = 'text-[10px] text-[#333]';
+                sep.textContent = '/';
+                container.appendChild(sep);
+
+                // Part
+                const item = document.createElement('span');
+                const isLast = index === state.currentPath.length - 1;
+                item.className = `text-[10px] font-mono cursor-pointer hover:text-white transition-colors ${isLast ? 'text-white font-bold' : 'text-[#666]'}`;
+                item.textContent = part;
+                item.onclick = () => navigateToPath(index);
+                container.appendChild(item);
+            });
+        }
+
+        function navigateToPath(index) {
+            // Index -1 = Root. Index 0 = First folder, etc.
+            if (index === -1) {
+                state.currentPath = [];
+            } else {
+                state.currentPath = state.currentPath.slice(0, index + 1);
+            }
+            const pathStr = state.currentPath.join('/');
+            fetchAnalysis(state.currentUrl, pathStr);
+        }
+
         // --- API & LANDING PAGE ---
-        async function fetchAnalysis(url) {
+        async function fetchAnalysis(url, subpath = "") {
+            state.currentUrl = url;
+            // ... (rest is largely same but query params changed)
             const btnText = document.getElementById('btnVisText');
             const btnIcon = document.getElementById('btnVisIcon');
             const status = document.getElementById('loadingStatus');
@@ -330,8 +381,8 @@
             btnIcon.classList.add('hidden');
 
             try {
-                // Call Serverless Function
-                const response = await fetch(`/api/analyze?url=${encodeURIComponent(url)}`);
+                // Call Serverless Function with subpath
+                const response = await fetch(`/api/analyze?url=${encodeURIComponent(url)}&subpath=${encodeURIComponent(subpath)}`);
                 if (!response.ok) {
                     let errorMessage = 'Analysis failed';
                     const contentType = response.headers.get("content-type");
@@ -467,6 +518,7 @@
 
             applyTimeFilter();
             updateUI();
+            updateBreadcrumbs(); // Added
         }
 
         // --- DATA FILTERING ---
@@ -518,6 +570,36 @@
             // Initial render (empty)
             updateUI();
             loop();
+
+            // Double Click for Drill Down
+            const canvas = document.getElementById('graphCanvas');
+            canvas.addEventListener('dblclick', (e) => {
+                // Find node under cursor
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+
+                // Simple hit test (brute force)
+                const hit = state.simNodes.find(n => {
+                    const dx = n.x - x;
+                    const dy = n.y - y;
+                    return (dx * dx + dy * dy) < (n.size * n.size);
+                });
+
+                if (hit) {
+                    // Check if it is a container (Folder)
+                    // We can check type or infer from label (no extension)
+                    // Or if type='FOLDER' (backend sets this)
+                    if (hit.type === 'FOLDER' || hit.type === 'CONFIG' || hit.label.indexOf('.') === -1) {
+                        const fullPath = hit.label;
+                        state.currentPath = fullPath.split('/');
+                        console.log("Drilling down to:", fullPath);
+                        fetchAnalysis(state.currentUrl, fullPath);
+                    } else {
+                        console.log("Clicked file, no deeper level:", hit.label);
+                    }
+                }
+            });
         }
 
         // --- PHYSICS ENGINE ---

@@ -133,9 +133,10 @@ def get_commits(repo_path):
             
     return commits
 
-def analyze_history(commits):
+def analyze_history(commits, subpath=""):
     """
     Calculates churn and coupling.
+    Supports subpath filtering and relative clustering.
     """
     file_metadata = {} # path -> {createdAt, size(churn), owner}
     couplings = Counter() # (fileA, fileB) -> count
@@ -144,10 +145,16 @@ def analyze_history(commits):
     all_files = set()
     for commit in commits:
         files = [f for f in commit["files"] if not f.startswith('.git')]
+        if subpath:
+            # Filter by subpath (must start with subpath/)
+            # We add a trailing slash to subpath to ensure we match directories
+            prefix = subpath if subpath.endswith('/') else subpath + '/'
+            files = [f for f in files if f.startswith(prefix) or f == subpath]
         all_files.update(files)
         
     # Smart Aggregation Logic
-    USE_CLUSTERING = len(all_files) > 200
+    # If we have too many nodes (> 150) in this view, we cluster them by directory
+    USE_CLUSTERING = len(all_files) > 150
     
     for commit in commits:
         files = commit["files"]
@@ -157,21 +164,35 @@ def analyze_history(commits):
         # Filter files - relaxed
         files = [f for f in files if not f.startswith('.git/') and not f == '.git']
         
+        if subpath:
+             prefix = subpath if subpath.endswith('/') else subpath + '/'
+             files = [f for f in files if f.startswith(prefix) or f == subpath]
+        
+        if not files:
+            continue
+        
         if USE_CLUSTERING:
-            # Map files to their parent directories
-            # e.g. 'src/ui/Button.tsx' -> 'src/ui'
-            # e.g. 'README.md' -> '(root)'
+            # Map files to their parent directories relative to subpath
             clustered_files = set()
             for f in files:
-                if '/' in f:
-                    # Use the parent directory as the node
-                    parent = os.path.dirname(f)
-                    clustered_files.add(parent)
+                # Get path relative to current drill-down level
+                # e.g. subpath="src", f="src/ui/Button.tsx" -> rel="ui/Button.tsx"
+                if f == subpath:
+                    clustered_files.add(f)
+                    continue
+                    
+                rel_path = f[len(subpath):]
+                if rel_path.startswith('/'): rel_path = rel_path[1:]
+                
+                if '/' in rel_path:
+                    # It has a subdirectory, group by that
+                    top_dir = rel_path.split('/')[0]
+                    # Reconstruct full path for uniqueness
+                    full_cluster_path = f"{subpath}/{top_dir}" if subpath else top_dir
+                    clustered_files.add(full_cluster_path)
                 else:
-                    # Root files stay as themselves or grouped into '(root)'
-                    # Let's keep them as files for now, or group them? 
-                    # Grouping is cleaner for chaos reduction.
-                    clustered_files.add("(root)")
+                    # It's a direct child file, keep it
+                    clustered_files.add(f)
             
             # Use the unique set of directories for this commit
             files = list(clustered_files)
@@ -222,6 +243,14 @@ def get_file_type(filepath):
         '.jsx': 'REACT',
         '.tsx': 'REACT'
     }
+    # If no extension, assume it's a folder or special file
+    if not ext:
+        # Heuristic: Uppercase usually Makefile, LICENSE, etc.
+        # Lowercase usually folder
+        if os.path.basename(filepath).isupper():
+            return 'CONFIG'
+        return 'FOLDER'
+        
     return mapping.get(ext, 'OTHER')
 
 def generate_json(file_metadata, couplings):
@@ -268,6 +297,8 @@ class handler(BaseHTTPRequestHandler):
             parsed = urlparse(self.path)
             params = parse_qs(parsed.query)
             repo_url = params.get('url', [None])[0]
+            subpath = params.get('subpath', [""])[0] 
+            if subpath and subpath.endswith('/'): subpath = subpath[:-1]
 
             if not repo_url:
                 # Health Check / Debug Info
@@ -301,7 +332,22 @@ class handler(BaseHTTPRequestHandler):
                 porcelain.clone(repo_url, temp_dir, depth=500)
                 
                 commits = get_commits(temp_dir)
-                file_metadata, couplings = analyze_history(commits)
+                repo_url = params.get('url', [None])[0]
+                subpath = params.get('subpath', [""])[0]
+                # Clean subpath
+                if subpath and subpath.endswith('/'): subpath = subpath[:-1]
+
+                # ... (rest of code)
+                
+                # Clone using Dulwich
+                # supports https://...
+                # usage: porcelain.clone(source, target, bare=False, checkout=False, depth=None)
+                # We use depth=500 to avoid disk space issues on Vercel with large repos
+                # print(f"Cloning {repo_url} with depth 500...")
+                porcelain.clone(repo_url, temp_dir, depth=500)
+                
+                commits = get_commits(temp_dir)
+                file_metadata, couplings = analyze_history(commits, subpath)
                 data = generate_json(file_metadata, couplings)
 
                 self.send_response(200)
