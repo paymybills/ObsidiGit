@@ -202,9 +202,14 @@ def generate_json(file_metadata, couplings):
     """
     formatted_nodes = []
     for f, meta in file_metadata.items():
+        # Frontend expects 'label' and 'type'
+        # Group is used for color/grouping, type is used for display
+        group = get_file_type(f)
         formatted_nodes.append({
             "id": f,
-            "group": get_file_type(f),
+            "label": f, # Use filename as label
+            "group": group,
+            "type": group,
             "size": meta["size"],
             "owner": meta["owner"],
             "createdAt": meta["createdAt"]
