@@ -330,17 +330,24 @@
             btnIcon.classList.add('hidden');
 
             try {
-                // Call Serverless Function
-                const response = await fetch(`/api/analyze?url=${encodeURIComponent(url)}`);
                 if (!response.ok) {
+                    let errorMessage = 'Analysis failed';
                     const contentType = response.headers.get("content-type");
+
                     if (contentType && contentType.indexOf("application/json") !== -1) {
-                        const errData = await response.json();
-                        if (errData.error) {
-                            throw new Error(errData.error);
-                        }
+                        try {
+                            const errData = await response.json();
+                            if (errData.error) {
+                                errorMessage = errData.error;
+                            }
+                        } catch (e) { console.error("Failed to parse error JSON", e); }
+                    } else {
+                        // It's likely HTML (500 Error)
+                        const text = await response.text();
+                        console.error('Server Error Text:', text);
+                        errorMessage = `Server Error (${response.status}): ${text.substring(0, 100)}... (check console)`;
                     }
-                    throw new Error('Analysis failed');
+                    throw new Error(errorMessage);
                 }
                 const data = await response.json();
 
