@@ -51,18 +51,44 @@ def get_commits(repo_path):
     
     empty_tree_id = Tree().id
     
-    for commit in all_commits:
+    for entry in all_commits:
+        # dulwich.walker.Walker returns WalkEntry objects
+        # We need to get the actual commit object
+        try:
+            commit = entry.commit
+        except AttributeError:
+            # Fallback if it's already a commit object (older versions?)
+            commit = entry
+
         files = []
         
         # Determine parent tree for diff
         if commit.parents:
             parent_tree_id = repo[commit.parents[0]].tree
         else:
-            parent_tree_id = empty_tree_id
+            # Initial commit: diff against empty tree.
+            # However, in partial clones, the empty tree object might not exist.
+            # We can use None to indicate "new root".
+             parent_tree_id = None
             
         current_tree_id = commit.tree
         
         # Get changes
+        if parent_tree_id is None:
+             # If no parent, we simply walk the current tree recursively
+             # But tree_changes requires two trees.
+             # Alternative: use repo.object_store.tree_changes with empty_tree_id ONLY if it exists?
+             # Or construct a virtual empty tree?
+             # Actually diff_tree.tree_changes handles None as "empty" usually, let's verify.
+             # Inspecting dulwich source, tree_changes(store, tree1, tree2)
+             # If tree1 is None, it should treat as empty.
+             pass
+             
+        # tree_changes(store, tree1_id, tree2_id)
+        # If we pass None for tree1_id, does dulwich handle it?
+        # Based on error, it tried to lookup empty_tree_id and failed.
+        # Let's see if we can pass None.
+        
         changes = tree_changes(repo.object_store, parent_tree_id, current_tree_id)
         
         for change in changes:
@@ -70,9 +96,9 @@ def get_commits(repo_path):
             # change.new is None for deletions, change.old is None for creations.
             # If both exist (modify), we use new path.
             fpath = None
-            if change.new.path:
+            if change.new and change.new.path:
                 fpath = change.new.path
-            elif change.old.path:
+            elif change.old and change.old.path:
                 fpath = change.old.path
                 
             if fpath:
