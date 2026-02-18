@@ -432,9 +432,10 @@
             }
 
             // Detect time range
+            // Use reduce instead of Math.min(...arr) to avoid "Maximum call stack size exceeded" on large arrays
             const timestamps = data.nodes.map(n => n.createdAt).concat(data.links.map(l => l.createdAt));
-            const minTime = Math.min(...timestamps);
-            const maxTime = Math.max(...timestamps);
+            const minTime = timestamps.length ? timestamps.reduce((a, b) => Math.min(a, b)) : 0;
+            const maxTime = timestamps.length ? timestamps.reduce((a, b) => Math.max(a, b)) : 100;
 
             // Normalize time to 0-100 steps for scrubber
             // We'll store original timestamps but map simulation time to steps
