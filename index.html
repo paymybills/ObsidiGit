@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Architectural Intelligence</title>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Tailwind CSS (for layout utility) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* --- VISUAL IDENTITY: AMOLED STEALTH --- */
+        :root {
+            --bg: #000000;
+            --panel: #050505;
+            /* Almost pure black for depth */
+            --panel-border: #1a1a1a;
+            --accent: #ffffff;
+            /* Pure white accent for stark contrast */
+            --accent-dim: #404040;
+            --danger: #cf222e;
+            /* GitHub/Standard Error Red */
+            --text: #f0f6fc;
+            --text-muted: #8b949e;
+            --grid: #0a0a0a;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            font-family: 'SF Mono', 'Segoe UI Mono', 'Roboto Mono', monospace;
+            /* Tech/Dev font */
+            margin: 0;
+            overflow: hidden;
+            user-select: none;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Scrollbar Styling */
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 2px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+
+        /* Utilities */
+        .hidden {
+            display: none !important;
+        }
+
+        .glass-panel {
+            background: rgba(5, 5, 5, 0.9);
+            backdrop-filter: blur(8px);
+            border: 1px solid var(--panel-border);
+        }
+
+        /* Animations */
+        .slide-in {
+            animation: slideIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(20px);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        /* Interactive Elements */
+        .node-item {
+            transition: all 0.1s ease;
+            border-left: 2px solid transparent;
+        }
+
+        .node-item:hover {
+            background-color: #0f0f0f;
+            color: #fff;
+        }
+
+        .node-item.active {
+            background-color: #0f0f0f;
+            border-left-color: var(--accent);
+            color: #fff;
+        }
+
+        /* Range Input Reset */
+        input[type=range] {
+            -webkit-appearance: none;
+            background: transparent;
+        }
+
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+        }
+    </style>
+</head>
+
+<body class="relative h-screen w-screen">
+
+    <!-- 1. The Canvas Layer -->
+    <canvas id="graphCanvas" class="absolute top-0 left-0 w-full h-full cursor-crosshair"></canvas>
+
+    <!-- 2. Left Sidebar (File Tree) -->
+    <div class="absolute top-0 left-0 bottom-0 w-72 border-r border-[#1a1a1a] bg-black flex flex-col z-10">
+        <!-- Header -->
+        <div class="h-14 border-b border-[#1a1a1a] flex items-center px-5 gap-3 bg-black">
+            <i data-lucide="cpu" class="w-4 h-4 text-white"></i>
+            <span class="font-bold text-xs tracking-widest text-white uppercase">Arch_Intel</span>
+        </div>
+
+        <!-- Stats -->
+        <div class="p-4 grid grid-cols-2 gap-px bg-[#1a1a1a] border-b border-[#1a1a1a]">
+            <div class="bg-black p-3 text-center">
+                <div class="text-[9px] text-[#666] uppercase tracking-wider mb-1">Modules</div>
+                <div id="stat-nodes" class="text-sm font-bold text-white">0</div>
+            </div>
+            <div class="bg-black p-3 text-center">
+                <div class="text-[9px] text-[#666] uppercase tracking-wider mb-1">Couplings</div>
+                <div id="stat-links" class="text-sm font-bold text-white">0</div>
+            </div>
+        </div>
+
+        <!-- Search -->
+        <div class="px-4 py-4">
+            <div class="relative group">
+                <i data-lucide="search"
+                    class="absolute left-3 top-2.5 w-3.5 h-3.5 text-[#444] group-hover:text-white transition-colors"></i>
+                <input type="text" placeholder="FILTER_NODES..."
+                    class="w-full bg-[#0a0a0a] border border-[#1a1a1a] rounded-none text-xs py-2.5 pl-9 pr-3 text-gray-300 focus:outline-none focus:border-white focus:ring-0 transition-all placeholder-[#333]">
+            </div>
+        </div>
+
+        <!-- Tree List Container -->
+        <div class="flex-1 overflow-y-auto px-0 space-y-px" id="fileTree">
+            <!-- Items injected by JS -->
+        </div>
+
+        <!-- Footer Status -->
+        <div
+            class="h-8 border-t border-[#1a1a1a] bg-[#050505] flex items-center px-4 text-[10px] text-[#444] font-mono justify-between">
+            <span id="systemStatus">SYSTEM READY</span>
+            <div class="flex items-center gap-2">
+                <span id="isolationBadge" class="hidden text-[9px] bg-white text-black px-1 font-bold">ISOLATED</span>
+                <span class="w-1.5 h-1.5 bg-green-900 rounded-full shadow-[0_0_5px_rgba(20,83,45,0.8)]"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. Right Inspection Panel (Floating HUD) -->
+    <div id="detailPanel"
+        class="hidden absolute top-6 right-6 w-80 glass-panel shadow-2xl flex flex-col overflow-hidden z-20">
+        <!-- Header -->
+        <div class="p-5 border-b border-[#1a1a1a] flex justify-between items-start bg-black/50">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 flex items-center justify-center border border-[#333] bg-[#0a0a0a]">
+                    <i data-lucide="box" class="w-4 h-4 text-white"></i>
+                </div>
+                <div>
+                    <h2 id="detailLabel" class="text-sm font-bold text-white leading-tight tracking-tight">Label</h2>
+                    <span id="detailId" class="text-[9px] text-[#555] font-mono uppercase">ID_REF</span>
+                </div>
+            </div>
+            <button id="closeDetail" class="text-[#444] hover:text-white transition-colors"><i data-lucide="x"
+                    class="w-4 h-4"></i></button>
+        </div>
+
+        <!-- Body -->
+        <div class="p-5 space-y-5">
+            <!-- Action -->
+            <button id="btnBlast"
+                class="w-full py-3 px-3 text-[10px] font-bold tracking-widest uppercase flex items-center justify-center gap-2 border border-[#333] bg-[#0a0a0a] text-gray-400 hover:text-white hover:border-white hover:bg-white/5 transition-all">
+                <i data-lucide="activity" class="w-3.5 h-3.5"></i>
+                <span id="btnBlastText">Analysis Mode</span>
+            </button>
+
+            <!-- Metadata Table -->
+            <div>
+                <h3 class="text-[9px] uppercase tracking-widest font-bold text-[#444] mb-2">Specifications</h3>
+                <div class="border border-[#1a1a1a] text-xs">
+                    <div class="flex justify-between p-2 border-b border-[#1a1a1a] bg-[#050505]">
+                        <span class="text-[#666]">Type</span>
+                        <span id="detailType" class="text-white font-mono">TYPE</span>
+                    </div>
+                    <div class="flex justify-between p-2 border-b border-[#1a1a1a] bg-[#050505]">
+                        <span class="text-[#666]">Maintainer</span>
+                        <span id="detailOwner" class="text-white">Owner</span>
+                    </div>
+                    <div class="flex justify-between p-2 bg-[#050505]">
+                        <span class="text-[#666]">Lifecycle</span>
+                        <span id="detailCreated" class="text-white">Cycle 0</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Description -->
+            <div>
+                <h3 class="text-[9px] uppercase tracking-widest font-bold text-[#444] mb-2">Manifest</h3>
+                <p id="detailDesc"
+                    class="text-[11px] text-[#888] leading-relaxed font-sans border-l border-[#333] pl-3">
+                    Description text...
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 4. Bottom Timeline Scrubber -->
+    <div
+        class="absolute bottom-8 left-1/2 transform -translate-x-1/2 w-[600px] h-14 glass-panel rounded-full flex items-center px-6 gap-6 shadow-2xl z-20">
+        <button id="btnPlay"
+            class="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 transition-colors border border-transparent hover:border-[#333]">
+            <i data-lucide="play" class="w-3.5 h-3.5 fill-current"></i>
+        </button>
+
+        <div class="flex-1 relative h-[2px] bg-[#222] group cursor-pointer">
+            <!-- The visual progress bar -->
+            <div id="progressBar"
+                class="absolute top-0 left-0 h-full bg-white shadow-[0_0_10px_rgba(255,255,255,0.3)] pointer-events-none"
+                style="width: 100%;">
+                <div class="absolute right-0 top-1/2 transform -translate-y-1/2 w-2 h-2 bg-white rounded-full"></div>
+            </div>
+            <!-- The invisible input -->
+            <input type="range" id="timeScrubber" min="0" max="12" value="12"
+                class="absolute top-[-10px] left-0 w-full h-6 opacity-0 cursor-pointer">
+        </div>
+
+        <div class="text-[10px] font-mono text-[#666] min-w-[50px] text-right">
+            T <span id="timeLabel" class="text-white">12</span>
+        </div>
+    </div>
+
+    <!-- Application Logic -->
+    <script>
+        // --- CONSTANTS ---
+        const THEME = {
+            bg: '#000000',
+            panel: '#050505',
+            border: '#1a1a1a',
+            accent: '#ffffff',
+            textDim: '#555555',
+            danger: '#cf222e',
+            grid: '#0a0a0a'
+        };
+
+        // --- STATE ---
+        const state = {
+            nodes: [],
+            links: [],
+            timelineSteps: 12,
+            currentTime: 12,
+            isPlaying: false,
+            selectedNode: null,
+            blastMode: false,
+            simNodes: [], // Physics entities
+            simLinks: []
+        };
+
+        // --- DATA LOADING (DRAG & DROP) ---
+        function handleDrop(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            document.body.style.opacity = "1.0";
+
+            const dt = e.dataTransfer;
+            const files = dt.files;
+
+            if (files.length > 0) {
+                const file = files[0];
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    try {
+                        const data = JSON.parse(event.target.result);
+                        loadData(data);
+                    } catch (err) {
+                        console.error("Error parsing JSON:", err);
+                        alert("Invalid JSON file.");
+                    }
+                };
+                reader.readAsText(file);
+            }
+        }
+
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            document.body.style.opacity = "0.5";
+        }
+
+        function handleDragLeave(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            document.body.style.opacity = "1.0";
+        }
+
+        function loadData(data) {
+            if (!data.nodes || !data.links) {
+                alert("JSON must contain 'nodes' and 'links' arrays.");
+                return;
+            }
+
+            // Detect time range
+            const timestamps = data.nodes.map(n => n.createdAt).concat(data.links.map(l => l.createdAt));
+            const minTime = Math.min(...timestamps);
+            const maxTime = Math.max(...timestamps);
+
+            // Normalize time to 0-100 steps for scrubber
+            // We'll store original timestamps but map simulation time to steps
+            const STEPS = 100;
+            const timeStep = (maxTime - minTime) / STEPS;
+
+            // Map data to normalized time
+            state.nodes = data.nodes.map(n => ({
+                ...n,
+                x: (window.innerWidth / 2) + (Math.random() * 500 - 250),
+                y: (window.innerHeight / 2) + (Math.random() * 500 - 250),
+                vx: 0, vy: 0,
+                normalizedTime: Math.floor((n.createdAt - minTime) / timeStep)
+            }));
+
+            state.links = data.links.map(l => ({
+                ...l,
+                normalizedTime: Math.floor((l.createdAt - minTime) / timeStep)
+            }));
+
+            state.timelineSteps = STEPS;
+            state.currentTime = STEPS; // Start at end
+
+            // Update UI Max
+            document.getElementById('timeScrubber').max = STEPS;
+            document.getElementById('timeScrubber').value = STEPS;
+
+            applyTimeFilter();
+            updateUI();
+        }
+
+        // --- DATA FILTERING ---
+        function applyTimeFilter() {
+            // Filter nodes that exist at or before current time
+            const visNodes = state.nodes.filter(n => n.normalizedTime <= state.currentTime);
+
+            // Update simNodes: keep existing physics state if node persists
+            // This prevents nodes from jumping around when new ones appear
+            state.simNodes = visNodes.map(n => {
+                const existing = state.simNodes.find(e => e.id === n.id);
+                return existing || { ...n };
+            });
+
+            // Filter links: both source and target must happen by now, AND link itself must exist
+            const activeNodeIds = new Set(state.simNodes.map(n => n.id));
+            state.simLinks = state.links.filter(l =>
+                l.normalizedTime <= state.currentTime &&
+                activeNodeIds.has(l.source) &&
+                activeNodeIds.has(l.target)
+            );
+
+            populateFileTree();
+            updateUI();
+        }
+
+        // Initialize with empty or instruction
+        function init() {
+            // Set up Drag & Drop
+            document.body.addEventListener('drop', handleDrop, false);
+            document.body.addEventListener('dragover', handleDragOver, false);
+            document.body.addEventListener('dragleave', handleDragLeave, false);
+
+            // Initial render (empty)
+            updateUI();
+            loop();
+        }
+
+        // --- PHYSICS ENGINE ---
+        function updatePhysics() {
+            const nodes = state.simNodes;
+            const links = state.simLinks;
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            const center = { x: width / 2, y: height / 2 };
+
+            // PARAMETERS ADJUSTED FOR "LESS CLAMPED" FEEL
+            const REPULSION = 1600; // Increased significantly to spread nodes
+            const SPRING_LENGTH = 180; // Increased to allow loose connections
+            const SPRING = 0.005; // Weaker springs for floaty feel
+            const CENTER_GRAVITY = 0.003; // Very weak center pull
+            const DAMPING = 0.88; // Keep things smooth
+            const MAX_VELOCITY = 5.0;
+
+            for (let i = 0; i < nodes.length; i++) {
+                let a = nodes[i];
+                for (let j = i + 1; j < nodes.length; j++) {
+                    let b = nodes[j];
+                    let dx = a.x - b.x;
+                    let dy = a.y - b.y;
+                    let distSq = dx * dx + dy * dy;
+                    if (distSq < 100) distSq = 100;
+                    let force = REPULSION / distSq;
+                    let fx = (dx / Math.sqrt(distSq)) * force;
+                    let fy = (dy / Math.sqrt(distSq)) * force;
+                    a.vx += fx; a.vy += fy;
+                    b.vx -= fx; b.vy -= fy;
+                }
+                a.vx += (center.x - a.x) * CENTER_GRAVITY;
+                a.vy += (center.y - a.y) * CENTER_GRAVITY;
+            }
+
+            links.forEach(l => {
+                const s = nodes.find(n => n.id === l.source);
+                const t = nodes.find(n => n.id === l.target);
+                if (s && t) {
+                    let dx = t.x - s.x;
+                    let dy = t.y - s.y;
+                    let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                    let force = (dist - SPRING_LENGTH) * SPRING;
+                    let fx = (dx / dist) * force;
+                    let fy = (dy / dist) * force;
+                    s.vx += fx; s.vy += fy;
+                    t.vx -= fx; t.vy -= fy;
+                }
+            });
+
+            nodes.forEach(n => {
+                n.vx *= DAMPING;
+                n.vy *= DAMPING;
+                const v = Math.sqrt(n.vx * n.vx + n.vy * n.vy);
+                if (v > MAX_VELOCITY) {
+                    n.vx = (n.vx / v) * MAX_VELOCITY;
+                    n.vy = (n.vy / v) * MAX_VELOCITY;
+                }
+                n.x += n.vx;
+                n.y += n.vy;
+            });
+        }
+
+        // --- BLAST RADIUS BFS ---
+        function calculateBlastRadius(startId) {
+            const set = new Set();
+            if (!startId) return set;
+            const queue = [startId];
+            set.add(startId);
+            let depth = 0;
+            while (queue.length && depth < 2) {
+                const curr = queue.shift();
+                state.simLinks.forEach(l => {
+                    if (l.source === curr && !set.has(l.target)) { set.add(l.target); queue.push(l.target); }
+                    if (l.target === curr && !set.has(l.source)) { set.add(l.source); queue.push(l.source); }
+                });
+                depth++;
+            }
+            return set;
+        }
+
+        // --- RENDERER ---
+        const canvas = document.getElementById('graphCanvas');
+        const ctx = canvas.getContext('2d');
+
+        function draw() {
+            if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+            }
+
+            // Clear Background
+            ctx.fillStyle = THEME.bg;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Subtle Grid
+            ctx.strokeStyle = THEME.grid;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            const gridSize = 50;
+            // Optimizing: only draw necessary grid lines
+            for (let x = 0; x < canvas.width; x += gridSize) { ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); }
+            for (let y = 0; y < canvas.height; y += gridSize) { ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); }
+            ctx.stroke();
+
+            const impacted = calculateBlastRadius(state.selectedNode?.id);
+            const hasSelection = !!state.selectedNode;
+
+            // Links
+            state.simLinks.forEach(link => {
+                const s = state.simNodes.find(n => n.id === link.source);
+                const t = state.simNodes.find(n => n.id === link.target);
+                if (!s || !t) return;
+
+                const isImpacted = state.blastMode && impacted.has(s.id) && impacted.has(t.id);
+                const isSelected = state.selectedNode && (s.id === state.selectedNode.id || t.id === state.selectedNode.id);
+
+                // --- PARALYSIS PREVENTION: VISIBILITY LOGIC ---
+                let alpha = 1.0;
+                if (hasSelection) {
+                    if (isSelected || isImpacted) alpha = 1.0;
+                    else alpha = 0.02; // Ghost mode for irrelevant links
+                } else {
+                    alpha = 0.3; // Default dim
+                }
+
+                ctx.beginPath();
+                ctx.moveTo(s.x, s.y);
+                ctx.lineTo(t.x, t.y);
+
+                if (state.blastMode && isImpacted) {
+                    ctx.strokeStyle = THEME.danger;
+                    ctx.lineWidth = 2.0;
+                    ctx.globalAlpha = 1.0;
+                } else {
+                    ctx.strokeStyle = isSelected ? '#ffffff' : '#444';
+                    ctx.lineWidth = isSelected ? 1.5 : 0.8;
+                    ctx.globalAlpha = alpha;
+                }
+                ctx.stroke();
+            });
+            ctx.globalAlpha = 1.0; // Reset
+
+            // Nodes
+            state.simNodes.forEach(n => {
+                const isSel = state.selectedNode?.id === n.id;
+                const isImp = state.blastMode && impacted.has(n.id);
+
+                // --- PARALYSIS PREVENTION: NODE VISIBILITY ---
+                let nodeAlpha = 1.0;
+                if (hasSelection) {
+                    // Show if selected, impacted, or directly connected (simplified check via selection)
+                    // We check if it's the selected node OR if it's in the 'impacted' set which acts as immediate neighbors here
+                    if (isSel || isImp) nodeAlpha = 1.0;
+                    else nodeAlpha = 0.1; // Ghost mode for irrelevant nodes
+                }
+
+                ctx.globalAlpha = nodeAlpha;
+
+                // Draw Node (WHITE)
+                ctx.beginPath();
+                ctx.arc(n.x, n.y, n.size, 0, Math.PI * 2);
+
+                if (isImp && state.blastMode) ctx.fillStyle = THEME.danger;
+                else if (isSel) ctx.fillStyle = '#ffffff';
+                else ctx.fillStyle = '#ffffff'; // ALL NODES WHITE
+
+                ctx.fill();
+
+                // Border (Black for contrast on white node)
+                ctx.lineWidth = 1.5;
+                if (isImp && state.blastMode) ctx.strokeStyle = '#fff'; // White border on red node
+                else ctx.strokeStyle = '#000000'; // Black border on white node
+
+                ctx.stroke();
+
+                // Label
+                // Only show label if selected, or if no selection and node is "big" (LOD)
+                const showLabel = isSel || (n.size > 8 && !hasSelection) || (isImp && hasSelection);
+
+                if (showLabel) {
+                    ctx.fillStyle = isSel ? '#ffffff' : '#666666';
+                    ctx.font = isSel ? 'bold 11px monospace' : '9px monospace';
+                    ctx.fillText(n.label, n.x + 12, n.y + 3);
+                }
+                ctx.globalAlpha = 1.0;
+            });
+        }
+
+        // --- UI & INTERACTIONS ---
+        function updateUI() {
+            // Stats
+            document.getElementById('stat-nodes').textContent = state.simNodes.length;
+            document.getElementById('stat-links').textContent = state.simLinks.length;
+
+            // Detail Panel
+            const panel = document.getElementById('detailPanel');
+            const isolationBadge = document.getElementById('isolationBadge');
+
+            if (state.selectedNode) {
+                panel.classList.remove('hidden');
+                panel.classList.add('slide-in');
+                isolationBadge.classList.remove('hidden'); // Show Isolation Badge
+
+                document.getElementById('detailLabel').textContent = state.selectedNode.label;
+                document.getElementById('detailId').textContent = state.selectedNode.id.toUpperCase();
+                document.getElementById('detailType').textContent = state.selectedNode.type;
+                document.getElementById('detailOwner').textContent = state.selectedNode.owner;
+                document.getElementById('detailCreated').textContent = `REV.${state.selectedNode.createdAt}.0`;
+
+                const btnBlast = document.getElementById('btnBlast');
+                const btnText = document.getElementById('btnBlastText');
+                const btnIcon = btnBlast.querySelector('svg');
+
+                if (state.blastMode) {
+                    btnBlast.classList.remove('border-[#333]', 'bg-[#0a0a0a]', 'text-gray-400');
+                    btnBlast.classList.add('bg-red-900/20', 'border-red-600', 'text-red-500');
+                    btnText.textContent = "STOP ANALYSIS";
+                    if (btnIcon) btnIcon.style.color = '#ef4444';
+                } else {
+                    btnBlast.classList.add('border-[#333]', 'bg-[#0a0a0a]', 'text-gray-400');
+                    btnBlast.classList.remove('bg-red-900/20', 'border-red-600', 'text-red-500');
+                    btnText.textContent = "ANALYSIS MODE";
+                    if (btnIcon) btnIcon.style.color = '';
+                }
+            } else {
+                panel.classList.add('hidden');
+                isolationBadge.classList.add('hidden'); // Hide Badge
+                state.blastMode = false;
+            }
+
+            // Timeline
+            document.getElementById('timeLabel').textContent = `${state.currentTime}`;
+            document.getElementById('progressBar').style.width = `${(state.currentTime / state.timelineSteps) * 100}%`;
+
+            const btnPlay = document.getElementById('btnPlay');
+            // Lucide icons logic simplified
+        }
+
+        function populateFileTree() {
+            const container = document.getElementById('fileTree');
+            container.innerHTML = '<div class="text-[9px] text-[#444] px-4 py-2 uppercase tracking-widest bg-black sticky top-0 border-b border-[#1a1a1a]">System Modules</div>';
+
+            // Limit for performance in list
+            state.simNodes.slice(0, 20).forEach(node => {
+                const div = document.createElement('div');
+                div.dataset.id = node.id;
+                div.className = `node-item flex items-center gap-3 px-4 py-3 cursor-pointer text-xs text-[#888] border-b border-[#0f0f0f]`;
+
+                if (state.selectedNode?.id === node.id) div.classList.add('active');
+
+                div.onclick = () => {
+                    state.selectedNode = node;
+                    updateUI();
+                    renderTreeHighlight();
+                };
+
+                div.innerHTML = `
+                    <i data-lucide="box" class="w-3 h-3 text-[#333] transition-colors"></i> 
+                    <span class="truncate font-mono">${node.label}</span>
+                `;
+                container.appendChild(div);
+            });
+
+            lucide.createIcons();
+        }
+
+        function renderTreeHighlight() {
+            const items = document.querySelectorAll('.node-item');
+
+            items.forEach((item) => {
+                const nodeId = item.dataset.id;
+                const icon = item.querySelector('svg');
+
+                if (state.selectedNode?.id === nodeId) {
+                    item.classList.add('active');
+                    item.style.color = '#fff';
+                    if (icon) {
+                        icon.style.color = '#fff';
+                        icon.style.stroke = '#fff';
+                    }
+                } else {
+                    item.classList.remove('active');
+                    item.style.color = '#888';
+                    if (icon) {
+                        icon.style.color = '#333';
+                        icon.style.stroke = '#333';
+                    }
+                }
+            });
+        }
+
+
+        function loop() {
+            updatePhysics();
+            draw();
+            requestAnimationFrame(loop);
+        }
+
+        window.onload = () => {
+            init();
+
+            // --- LISTENERS ---
+
+            canvas.addEventListener('mousedown', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+
+                // Find clicked node
+                const clicked = state.simNodes.find(n => {
+                    const dist = Math.sqrt((n.x - x) ** 2 + (n.y - y) ** 2);
+                    return dist < (n.size + 15);
+                });
+
+                state.selectedNode = clicked || null;
+                if (!clicked) state.blastMode = false;
+
+                updateUI();
+                renderTreeHighlight();
+            });
+
+            const scrubber = document.getElementById('timeScrubber');
+            scrubber.addEventListener('input', (e) => {
+                state.currentTime = parseInt(e.target.value);
+                applyTimeFilter();
+            });
+
+            const btnPlay = document.getElementById('btnPlay');
+            btnPlay.addEventListener('click', () => {
+                state.isPlaying = !state.isPlaying;
+                // Toggle icon manually
+                if (state.isPlaying) {
+                    btnPlay.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>';
+                } else {
+                    btnPlay.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>';
+                }
+            });
+
+            document.getElementById('btnBlast').addEventListener('click', () => {
+                state.blastMode = !state.blastMode;
+                updateUI();
+            });
+
+            document.getElementById('closeDetail').addEventListener('click', () => {
+                state.selectedNode = null;
+                state.blastMode = false;
+                updateUI();
+                renderTreeHighlight();
+            });
+
+            setInterval(() => {
+                if (state.isPlaying) {
+                    state.currentTime++;
+                    if (state.currentTime > state.timelineSteps) state.currentTime = 0;
+                    scrubber.value = state.currentTime;
+                    applyTimeFilter();
+                    updateUI();
+                }
+            }, 600);
+        };
+    </script>
+</body>
+
+</html>
