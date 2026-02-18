@@ -683,8 +683,19 @@
             requestAnimationFrame(loop);
         }
 
-        window.onload = () => {
+        window.onload = async () => {
             init();
+
+            // Try to load demo data if available
+            try {
+                const response = await fetch('demo.json');
+                if (response.ok) {
+                    const data = await response.json();
+                    loadData(data);
+                }
+            } catch (e) {
+                console.log("No demo data found.");
+            }
 
             // --- LISTENERS ---
 
