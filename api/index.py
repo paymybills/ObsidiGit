@@ -1,8 +1,6 @@
-import subprocess
 import json
 import os
 import sys
-import argparse
 import tempfile
 import shutil
 from collections import defaultdict, Counter
@@ -10,83 +8,72 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
-def run_git_log(repo_path):
-    """
-    Executes git log to retrieve commit history in the specified repo path.
-    """
-    cmd = [
-        "git",
-        "log",
-        "--reverse",
-        "--pretty=format:%H|%at|%aN|%s",
-        "--name-only",
-        "--no-merges"
-    ]
-    
-    try:
-        # Run git command
-        result = subprocess.run(cmd, cwd=repo_path, capture_output=True, text=True, encoding='utf-8', errors='replace')
-        if result.returncode != 0:
-            print(f"Error executing git log: {result.stderr}")
-            sys.exit(1)
-        return result.stdout
-    except Exception as e:
-        print(f"Failed to run git log: {e}")
-        sys.exit(1)
+# Import Dulwich
+from dulwich import porcelain
+from dulwich.repo import Repo
+from dulwich.diff import tree_changes
+from dulwich.objects import Tree
 
-def clone_repo(url, temp_dir):
+def get_commits(repo_path):
     """
-    Clones the repo metadata only (partial clone) to temp_dir.
+    Retrieves commit history using Dulwich.
     """
-    print(f"Cloning {url} (metadata only)...")
-    cmd = [
-        "git",
-        "clone",
-        "--filter=blob:none", # Don't download file contents
-        "--no-checkout",      # Don't check out files to disk
-        url,
-        temp_dir
-    ]
-    try:
-        subprocess.run(cmd, check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"Failed to clone repo: {e}")
-        sys.exit(1)
-
-def parse_log(log_output):
-    """
-    Parses the git log output into a structured format.
-    """
+    repo = Repo(repo_path)
     commits = []
-    current_commit = None
     
-    lines = log_output.strip().split('\n')
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-            
-        if '|' in line and len(line.split('|')) >= 3:
-            # New commit header
-            parts = line.split('|')
-            commit_hash = parts[0]
-            timestamp = int(parts[1])
-            author = parts[2]
-            subject = parts[3] if len(parts) > 3 else ""
-            
-            current_commit = {
-                "hash": commit_hash,
-                "timestamp": timestamp,
-                "author": author,
-                "subject": subject,
-                "files": []
-            }
-            commits.append(current_commit)
+    # Get walker (iterates from most recent backwards)
+    walker = repo.get_walker()
+    
+    # Convert to list and reverse to get chronological order (oldest first)
+    all_commits = list(walker)
+    all_commits.reverse()
+    
+    empty_tree_id = Tree().id
+    
+    for commit in all_commits:
+        files = []
+        
+        # Determine parent tree for diff
+        if commit.parents:
+            parent_tree_id = repo[commit.parents[0]].tree
         else:
-            # File path
-            if current_commit:
-                current_commit["files"].append(line)
+            parent_tree_id = empty_tree_id
+            
+        current_tree_id = commit.tree
+        
+        # Get changes
+        changes = tree_changes(repo.object_store, parent_tree_id, current_tree_id)
+        
+        for change in changes:
+            # We want the filename. 
+            # change.new is None for deletions, change.old is None for creations
+            # If both exist (modify), we use new path.
+            fpath = None
+            if change.new.path:
+                fpath = change.new.path
+            elif change.old.path:
+                fpath = change.old.path
                 
+            if fpath:
+                # Dulwich paths are bytes
+                try:
+                    files.append(fpath.decode('utf-8'))
+                except:
+                    files.append(str(fpath))
+
+        # Parse author (Format: b"Name <email>")
+        author = commit.author.decode('utf-8', errors='replace')
+        if '<' in author:
+            author = author.split('<')[0].strip()
+
+        commits.append({
+            "hash": commit.id.decode('utf-8'),
+            "timestamp": commit.commit_time,
+            "author": author,
+            "subject": commit.message.decode('utf-8', errors='replace').split('\n')[0],
+            "files": files
+        })
+            
     return commits
 
 def analyze_history(commits):
@@ -101,16 +88,13 @@ def analyze_history(commits):
         timestamp = commit["timestamp"]
         author = commit["author"]
         
-        # Sort files to ensure consistent key for couplings
-        files.sort()
+        # Filter files - keep only code/text files roughly
+        files = [f for f in files if '.' in f and not f.startswith('.git')]
         
-        # Churn and Metadata
+        # Churn & Metadata
         for f in files:
             if f not in file_metadata:
                 file_metadata[f] = {
-                    "id": f,
-                    "label": os.path.basename(f),
-                    "type": get_file_type(f),
                     "size": 1, # Initial size/churn
                     "createdAt": timestamp,
                     "owner": author
@@ -124,7 +108,9 @@ def analyze_history(commits):
                 for j in range(i + 1, len(files)):
                     f1 = files[i]
                     f2 = files[j]
-                    couplings[(f1, f2)] += 1
+                    # Sort pair to ensure (A, B) is same as (B, A)
+                    pair = tuple(sorted((f1, f2)))
+                    couplings[pair] += 1
 
     return file_metadata, couplings
 
@@ -160,19 +146,49 @@ def generate_json(file_metadata, couplings):
     nodes = list(file_metadata.values())
     links = []
     
+    # Store index map
+    keys = list(file_metadata.keys())
+    key_to_id = {k: i for i, k in enumerate(keys)}
+    
+    # Reform nodes list with explicit IDs if needed, or just array matches
+    # Front-end expects d3-force structure usually.
+    # In my previous implementation I returned raw lists, let's verify format.
+    # Previous implementation:
+    """
+    nodes.append({
+        "id": f,
+        "group": get_file_type(f),
+        "size": meta["size"],
+        "owner": meta["owner"],
+        "createdAt": meta["createdAt"]
+    })
+    """
+    
+    formatted_nodes = []
+    for f, meta in file_metadata.items():
+        formatted_nodes.append({
+            "id": f,
+            "group": get_file_type(f),
+            "size": meta["size"],
+            "owner": meta["owner"],
+            "createdAt": meta["createdAt"]
+        })
+
     for pair, weight in couplings.items():
         source, target = pair
         if source in file_metadata and target in file_metadata:
-            link_time = max(file_metadata[source]["createdAt"], file_metadata[target]["createdAt"])
-            links.append({
-                "source": source,
-                "target": target,
-                "weight": weight,
-                "createdAt": link_time
-            })
+            # Check weight usage (only include if > 1 to reduce noise? optional)
+            if weight >= 1:
+                link_time = max(file_metadata[source]["createdAt"], file_metadata[target]["createdAt"])
+                links.append({
+                    "source": source,
+                    "target": target,
+                    "weight": weight,
+                    "createdAt": link_time
+                })
             
     return {
-        "nodes": nodes,
+        "nodes": formatted_nodes,
         "links": links
     }
 
@@ -190,20 +206,18 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"error": "Missing 'url' parameter"}).encode('utf-8'))
                 return
 
-            # Check for git
-            if shutil.which("git") is None:
-               self.send_response(500)
-               self.send_header('Content-type', 'application/json')
-               self.end_headers()
-               self.wfile.write(json.dumps({"error": "Git not installed on server environment"}).encode('utf-8'))
-               return
+            # Note: We no longer check for 'git' binary since we usage Dulwich.
 
             temp_dir = None
             try:
                 temp_dir = tempfile.mkdtemp()
-                clone_repo(repo_url, temp_dir)
-                log_output = run_git_log(temp_dir)
-                commits = parse_log(log_output)
+                
+                # Clone using Dulwich
+                # supports https://...
+                print(f"Cloning {repo_url}...")
+                porcelain.clone(repo_url, temp_dir)
+                
+                commits = get_commits(temp_dir)
                 file_metadata, couplings = analyze_history(commits)
                 data = generate_json(file_metadata, couplings)
 
@@ -213,6 +227,7 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(data).encode('utf-8'))
 
             except Exception as e:
+                # Try to send error if headers not sent
                 try:
                     self.send_response(500)
                 except: pass
@@ -235,6 +250,3 @@ class handler(BaseHTTPRequestHandler):
                  self.end_headers()
                  self.wfile.write(json.dumps({"error": f"Server error: {str(outer_e)}"}).encode('utf-8'))
             except: pass
-
-if __name__ == "__main__":
-    main()

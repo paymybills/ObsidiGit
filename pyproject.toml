@@ -1,0 +1,8 @@
+[project]
+name = "obsidi-git-analysis"
+version = "0.1.0"
+description = "Serverless git analysis"
+requires-python = ">=3.9"
+dependencies = [
+    "dulwich>=0.21.0"
+]
