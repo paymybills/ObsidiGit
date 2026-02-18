@@ -482,6 +482,21 @@
             document.body.addEventListener('dragover', handleDragOver, false);
             document.body.addEventListener('dragleave', handleDragLeave, false);
 
+            // Landing Page Listeners
+            const btnVisualize = document.getElementById('btnVisualize');
+            if (btnVisualize) {
+                btnVisualize.addEventListener('click', () => {
+                    const url = document.getElementById('repoUrlInput').value.trim();
+                    if (url) fetchAnalysis(url);
+                    else alert("Please enter a valid URL");
+                });
+            }
+
+            const btnDemo = document.getElementById('btnDemo');
+            if (btnDemo) {
+                btnDemo.addEventListener('click', loadDemo);
+            }
+
             // Initial render (empty)
             updateUI();
             loop();
