@@ -12,13 +12,22 @@ from urllib.parse import urlparse, parse_qs
 try:
     from dulwich import porcelain
     from dulwich.repo import Repo
-    from dulwich.diff import tree_changes
+    from dulwich.diff_tree import tree_changes
     from dulwich.objects import Tree
     DULWICH_AVAILABLE = True
     DULWICH_ERROR = None
-except ImportError as e:
-    DULWICH_AVAILABLE = False
-    DULWICH_ERROR = str(e)
+except ImportError:
+    # Try alternate import location just in case
+    try:
+        from dulwich import porcelain
+        from dulwich.repo import Repo
+        from dulwich.diff import tree_changes
+        from dulwich.objects import Tree
+        DULWICH_AVAILABLE = True
+        DULWICH_ERROR = None
+    except ImportError as e:
+        DULWICH_AVAILABLE = False
+        DULWICH_ERROR = str(e)
 
 def get_commits(repo_path):
     """
