@@ -145,8 +145,11 @@ def analyze_history(commits):
         timestamp = commit["timestamp"]
         author = commit["author"]
         
-        # Filter files - keep only code/text files roughly
-        files = [f for f in files if '.' in f and not f.startswith('.git')]
+        # Filter files
+        # Original: files = [f for f in files if '.' in f and not f.startswith('.git')]
+        # New: Relaxed filter. Keep everything except .git directory contents.
+        # This includes Makefiles, Dockerfiles, LICENSE, etc.
+        files = [f for f in files if not f.startswith('.git/') and not f == '.git']
         
         # Churn & Metadata
         for f in files:
@@ -267,9 +270,10 @@ class handler(BaseHTTPRequestHandler):
                 
                 # Clone using Dulwich
                 # supports https://...
-                # Note: Dulwich clone is strictly Git protocol or HTTPS
-                # print(f"Cloning {repo_url}...")
-                porcelain.clone(repo_url, temp_dir)
+                # usage: porcelain.clone(source, target, bare=False, checkout=False, depth=None)
+                # We use depth=500 to avoid disk space issues on Vercel with large repos
+                # print(f"Cloning {repo_url} with depth 500...")
+                porcelain.clone(repo_url, temp_dir, depth=500)
                 
                 commits = get_commits(temp_dir)
                 file_metadata, couplings = analyze_history(commits)
