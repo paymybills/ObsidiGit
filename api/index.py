@@ -140,17 +140,42 @@ def analyze_history(commits):
     file_metadata = {} # path -> {createdAt, size(churn), owner}
     couplings = Counter() # (fileA, fileB) -> count
     
+    # First pass: identify all files to check count
+    all_files = set()
+    for commit in commits:
+        files = [f for f in commit["files"] if not f.startswith('.git')]
+        all_files.update(files)
+        
+    # Smart Aggregation Logic
+    USE_CLUSTERING = len(all_files) > 200
+    
     for commit in commits:
         files = commit["files"]
         timestamp = commit["timestamp"]
         author = commit["author"]
         
-        # Filter files
-        # Original: files = [f for f in files if '.' in f and not f.startswith('.git')]
-        # New: Relaxed filter. Keep everything except .git directory contents.
-        # This includes Makefiles, Dockerfiles, LICENSE, etc.
+        # Filter files - relaxed
         files = [f for f in files if not f.startswith('.git/') and not f == '.git']
         
+        if USE_CLUSTERING:
+            # Map files to their parent directories
+            # e.g. 'src/ui/Button.tsx' -> 'src/ui'
+            # e.g. 'README.md' -> '(root)'
+            clustered_files = set()
+            for f in files:
+                if '/' in f:
+                    # Use the parent directory as the node
+                    parent = os.path.dirname(f)
+                    clustered_files.add(parent)
+                else:
+                    # Root files stay as themselves or grouped into '(root)'
+                    # Let's keep them as files for now, or group them? 
+                    # Grouping is cleaner for chaos reduction.
+                    clustered_files.add("(root)")
+            
+            # Use the unique set of directories for this commit
+            files = list(clustered_files)
+
         # Churn & Metadata
         for f in files:
             if f not in file_metadata:
