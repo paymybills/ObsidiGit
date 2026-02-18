@@ -443,11 +443,13 @@
             const timeStep = (maxTime - minTime) / STEPS;
 
             // Map data to normalized time
+            // SPREAD OUT INITIAL POSITIONS MORE to avoid explosion
             state.nodes = data.nodes.map(n => ({
                 ...n,
-                x: (window.innerWidth / 2) + (Math.random() * 500 - 250),
-                y: (window.innerHeight / 2) + (Math.random() * 500 - 250),
+                x: (window.innerWidth / 2) + (Math.random() * 2000 - 1000), // Widen spread
+                y: (window.innerHeight / 2) + (Math.random() * 2000 - 1000),
                 vx: 0, vy: 0,
+                size: Math.max(2, Math.min(n.size / 2, 10)), // Cap size: min 2, max 10
                 normalizedTime: Math.floor((n.createdAt - minTime) / timeStep)
             }));
 
@@ -634,13 +636,14 @@
                 const isImpacted = state.blastMode && impacted.has(s.id) && impacted.has(t.id);
                 const isSelected = state.selectedNode && (s.id === state.selectedNode.id || t.id === state.selectedNode.id);
 
+
                 // --- PARALYSIS PREVENTION: VISIBILITY LOGIC ---
                 let alpha = 1.0;
                 if (hasSelection) {
-                    if (isSelected || isImpacted) alpha = 1.0;
-                    else alpha = 0.02; // Ghost mode for irrelevant links
+                    if (isSelected || isImpacted) alpha = 0.8;
+                    else alpha = 0.01; // Almost invisible
                 } else {
-                    alpha = 0.3; // Default dim
+                    alpha = 0.05; // VERY FAINT by default to handle 650k links
                 }
 
                 ctx.beginPath();
@@ -653,7 +656,7 @@
                     ctx.globalAlpha = 1.0;
                 } else {
                     ctx.strokeStyle = isSelected ? '#ffffff' : '#444';
-                    ctx.lineWidth = isSelected ? 1.5 : 0.8;
+                    ctx.lineWidth = isSelected ? 1.5 : 0.5;
                     ctx.globalAlpha = alpha;
                 }
                 ctx.stroke();
@@ -668,39 +671,38 @@
                 // --- PARALYSIS PREVENTION: NODE VISIBILITY ---
                 let nodeAlpha = 1.0;
                 if (hasSelection) {
-                    // Show if selected, impacted, or directly connected (simplified check via selection)
-                    // We check if it's the selected node OR if it's in the 'impacted' set which acts as immediate neighbors here
                     if (isSel || isImp) nodeAlpha = 1.0;
-                    else nodeAlpha = 0.1; // Ghost mode for irrelevant nodes
+                    else nodeAlpha = 0.1; // Ghost mode
                 }
 
                 ctx.globalAlpha = nodeAlpha;
 
-                // Draw Node (WHITE)
+                // Draw Node
                 ctx.beginPath();
                 ctx.arc(n.x, n.y, n.size, 0, Math.PI * 2);
 
                 if (isImp && state.blastMode) ctx.fillStyle = THEME.danger;
                 else if (isSel) ctx.fillStyle = '#ffffff';
-                else ctx.fillStyle = '#ffffff'; // ALL NODES WHITE
+                else ctx.fillStyle = '#ffffff';
 
                 ctx.fill();
 
-                // Border (Black for contrast on white node)
-                ctx.lineWidth = 1.5;
-                if (isImp && state.blastMode) ctx.strokeStyle = '#fff'; // White border on red node
-                else ctx.strokeStyle = '#000000'; // Black border on white node
+                // Border 
+                ctx.lineWidth = 1.0; // Thinner border
+                if (isImp && state.blastMode) ctx.strokeStyle = '#fff';
+                else ctx.strokeStyle = '#000000';
 
                 ctx.stroke();
 
-                // Label
-                // Only show label if selected, or if no selection and node is "big" (LOD)
-                const showLabel = isSel || (n.size > 8 && !hasSelection) || (isImp && hasSelection);
+                // Label - AGGRESSIVE LOD
+                // Only show label if selected or hovered (we don't have hover state in loop yet, just selection)
+                // Or if node is VERY large relative to others
+                const showLabel = isSel || (n.size > 8 && state.simNodes.length < 500) || (isImp && hasSelection);
 
                 if (showLabel) {
-                    ctx.fillStyle = isSel ? '#ffffff' : '#666666';
-                    ctx.font = isSel ? 'bold 11px monospace' : '9px monospace';
-                    ctx.fillText(n.label, n.x + 12, n.y + 3);
+                    ctx.fillStyle = isSel ? '#ffffff' : '#888';
+                    ctx.font = isSel ? 'bold 12px monospace' : '10px monospace';
+                    ctx.fillText(n.label, n.x + n.size + 4, n.y + 3);
                 }
                 ctx.globalAlpha = 1.0;
             });
